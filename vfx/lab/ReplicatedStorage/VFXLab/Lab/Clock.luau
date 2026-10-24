@@ -15,16 +15,29 @@ local subscribers = {}
 local count = 0
 local connection = nil
 
+local function remove(fn)
+	-- Guarded: a subscriber can be removed twice in one frame (it unsubscribes itself and returns false).
+	if subscribers[fn] then
+		subscribers[fn] = nil
+		count -= 1
+	end
+end
+
 local function step(dt)
+	-- Snapshot: subscribers may add or remove others (a timeline starting another) during the step.
+	local current = {}
 	for fn in subscribers do
-		local ok, keep = pcall(fn, dt)
-		if not ok then
-			warn("VFXLab.Clock: subscriber error, removed: " .. tostring(keep))
-			subscribers[fn] = nil
-			count -= 1
-		elseif keep == false then
-			subscribers[fn] = nil
-			count -= 1
+		table.insert(current, fn)
+	end
+	for _, fn in current do
+		if subscribers[fn] then
+			local ok, keep = pcall(fn, dt)
+			if not ok then
+				warn("VFXLab.Clock: subscriber error, removed: " .. tostring(keep))
+				remove(fn)
+			elseif keep == false then
+				remove(fn)
+			end
 		end
 	end
 	if count <= 0 and connection then
@@ -43,10 +56,7 @@ function Clock.every(fn)
 		connection = RunService.Heartbeat:Connect(step)
 	end
 	return function()
-		if subscribers[fn] then
-			subscribers[fn] = nil
-			count -= 1
-		end
+		remove(fn)
 	end
 end
 
